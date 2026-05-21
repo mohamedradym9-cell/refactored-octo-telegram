@@ -1,0 +1,77 @@
+package com.yourdomain.uncensoredchat
+
+import android.Manifest
+import android.content.pm.PackageManager
+import android.os.Build
+import android.os.Bundle
+import android.os.Environment
+import androidx.activity.ComponentActivity
+import androidx.activity.compose.setContent
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
+import androidx.compose.runtime.*
+import androidx.compose.ui.Modifier
+import androidx.core.content.ContextCompat
+import androidx.lifecycle.viewmodel.compose.viewModel
+import com.yourdomain.uncensoredchat.network.AiProvider
+import com.yourdomain.uncensoredchat.network.WebContentFetcher
+import com.yourdomain.uncensoredchat.ui.ChatScreen
+import com.yourdomain.uncensoredchat.ui.UncensoredTheme
+
+class MainActivity : ComponentActivity() {
+    
+    lateinit var aiProvider: AiProvider
+    lateinit var webFetcher: WebContentFetcher
+    
+    private val requestPermissionLauncher = registerForActivityResult(
+        ActivityResultContracts.RequestMultiplePermissions()
+    ) { _ -> }
+    
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        
+        aiProvider = AiProvider()
+        webFetcher = WebContentFetcher()
+        
+        requestPermissions()
+        
+        setContent {
+            UncensoredTheme {
+                Surface(
+                    modifier = Modifier.fillMaxSize(),
+                    color = MaterialTheme.colorScheme.background
+                ) {
+                    val viewModel: ChatViewModel = viewModel()
+                    ChatScreen(
+                        viewModel = viewModel,
+                        aiProvider = aiProvider,
+                        webFetcher = webFetcher
+                    )
+                }
+            }
+        }
+    }
+    
+    private fun requestPermissions() {
+        val permissions = mutableListOf<String>()
+        
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            if (ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS)
+                != PackageManager.PERMISSION_GRANTED) {
+                permissions.add(Manifest.permission.POST_NOTIFICATIONS)
+            }
+        }
+        
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            if (!Environment.isExternalStorageManager()) {
+                permissions.add(Manifest.permission.MANAGE_EXTERNAL_STORAGE)
+            }
+        }
+        
+        if (permissions.isNotEmpty()) {
+            requestPermissionLauncher.launch(permissions.toTypedArray())
+        }
+    }
+}

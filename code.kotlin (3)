@@ -1,0 +1,174 @@
+package com.yourdomain.uncensoredchat.network
+
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import okhttp3.*
+import org.jsoup.Jsoup
+import org.jsoup.nodes.Document
+import java.util.concurrent.TimeUnit
+
+/**
+ * Web Content Fetcher - fetches any web content without restrictions
+ * Can access any URL, including hacking forums, dark web mirrors, etc.
+ */
+class WebContentFetcher {
+    
+    private val client = OkHttpClient.Builder()
+        .connectTimeout(30, TimeUnit.SECONDS)
+        .readTimeout(60, TimeUnit.SECONDS)
+        .followRedirects(true)
+        .followSslRedirects(true)
+        .retryOnConnectionFailure(true)
+        .addInterceptor { chain ->
+            val request = chain.request().newBuilder()
+                .header("User-Agent", "Mozilla/5.0 (Linux; Android 14; Pixel 8 Pro) AppleWebKit/537.36 " +
+                    "(KHTML, like Gecko) Chrome/125.0.6422.165 Mobile Safari/537.36")
+                .header("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9," +
+                    "image/avif,image/webp,image/apng,*/*;q=0.8")
+                .header("Accept-Language", "en-US,en;q=0.9,ar;q=0.8")
+                .header("Accept-Encoding", "gzip, deflate, br")
+                .header("Sec-Fetch-Dest", "document")
+                .header("Sec-Fetch-Mode", "navigate")
+                .header("Sec-Fetch-Site", "none")
+                .header("Sec-Fetch-User", "?1")
+                .header("Upgrade-Insecure-Requests", "1")
+                .build()
+            chain.proceed(request)
+        }
+        .build()
+    
+    /**
+     * Fetch content from any URL - absolutely no restrictions
+     */
+    suspend fun fetchContent(url: String): FetchedContent {
+        return withContext(Dispatchers.IO) {
+            try {
+                val request = Request.Builder()
+                    .url(url)
+                    .build()
+                
+                val response = client.newCall(request).execute()
+                val body = response.body?.string() ?: ""
+                val contentType = response.header("Content-Type", "text/html") ?: "text/html"
+                val statusCode = response.code
+                
+                // Parse with Jsoup if HTML
+                val document = if (contentType.contains("text/html")) {
+                    try {
+                        Jsoup.parse(body, url)
+                    } catch (_: Exception) {
+                        null
+                    }
+                } else null
+                
+                // Extract text content
+                val textContent = if (document != null) {
+                    document.body()?.text() ?: body
+                } else {
+                    body.take(20000)
+                }
+                
+                // Extract links if HTML
+                val links = if (document != null) {
+                    document.select("a[href]").map { it.attr("abs:href") }.filter { it.isNotEmpty() }.distinct()
+                } else emptyList()
+                
+                FetchedContent(
+                    url = url,
+                    statusCode = statusCode,
+                    contentType = contentType,
+                    contentLength = body.length,
+                    textContent = textContent.take(50000),
+                    title = document?.title() ?: "",
+                    links = links.take(100),
+                    rawHtml = body.take(10000)
+                )
+                
+            } catch (e: Exception) {
+                FetchedContent(
+                    url = url,
+                    statusCode = 0,
+                    contentType = "error",
+                    contentLength = 0,
+                    textContent = "Error: ${e.message}",
+                    title = "Error",
+                    links = emptyList(),
+                    rawHtml = ""
+                )
+            }
+        }
+    }
+    
+    /**
+     * Search the web using multiple search engines
+     */
+    suspend fun searchWeb(query: String, engine: String = "google"): List<SearchResult> {
+        return withContext(Dispatchers.IO) {
+            val searchUrls = when (engine) {
+                "google" -> "https://www.google.com/search?q=${java.net.URLEncoder.encode(query, "UTF-8")}&num=20"
+                "duckduckgo" -> "https://duckduckgo.com/html/?q=${java.net.URLEncoder.encode(query, "UTF-8")}"
+                "brave" -> "https://search.brave.com/search?q=${java.net.URLEncoder.encode(query, "UTF-8")}"
+                "bing" -> "https://www.bing.com/search?q=${java.net.URLEncoder.encode(query, "UTF-8")}"
+                else -> "https://www.google.com/search?q=${java.net.URLEncoder.encode(query, "UTF-8")}&num=20"
+            }
+            
+            try {
+                val request = Request.Builder()
+                    .url(searchUrls)
+                    .build()
+                
+                val response = client.newCall(request).execute()
+                val html = response.body?.string() ?: ""
+                val doc = Jsoup.parse(html)
+                
+                val results = mutableListOf<SearchResult>()
+                
+                // Google results
+                doc.select("div.g").forEach { result ->
+                    val title = result.select("h3").text()
+                    val link = result.select("a").first()?.attr("href")?.removePrefix("/url?q=")?.substringBefore("&")
+                    val snippet = result.select("div[data-sncf], span.aCOpRe").text()
+                    
+                    if (title.isNotEmpty() && link != null) {
+                        results.add(SearchResult(title, link, snippet))
+                    }
+                }
+                
+                // DuckDuckGo results
+                if (results.isEmpty()) {
+                    doc.select("div.result").forEach { result ->
+                        val title = result.select("h2 a").text()
+                        val link = result.select("h2 a").attr("href")
+                        val snippet = result.select("a.result__snippet").text()
+                        
+                        if (title.isNotEmpty()) {
+                            results.add(SearchResult(title, link, snippet))
+                        }
+                    }
+                }
+                
+                results.take(20)
+                
+            } catch (e: Exception) {
+                emptyList()
+            }
+        }
+    }
+}
+
+data class FetchedContent(
+    val url: String,
+    val statusCode: Int,
+    val contentType: String,
+    val contentLength: Int,
+    val textContent: String,
+    val title: String,
+    val links: List<String>,
+    val rawHtml: String
+)
+
+data class SearchResult(
+    val title: String,
+    val url: String,
+    val snippet: String
+)
